@@ -1,0 +1,22 @@
+{
+  "runId": "compralatino-templates-2026-10-03",
+  "scope": "plantillas web editables",
+  "fileKey": "bXeh1YS9nxp3KSRsHqweC9",
+  "pageId": "6:39",
+  "components": {
+    "buttonPrimary": "7:2",
+    "productCard": "7:4"
+  },
+  "screens": {
+    "catalog": "7:13",
+    "access": "7:64",
+    "administration": "7:96"
+  },
+  "completed": [
+    "source-and-library-discovery",
+    "foundations",
+    "editable-screen-templates",
+    "font-and-image-validation",
+    "administration-reference-update"
+  ]
+}

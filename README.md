@@ -16,7 +16,7 @@ La estructura sigue MVC: `web/` contiene las vistas, `server/controllers/` resue
 ## Ejecutar localmente
 
 1. Abre una terminal dentro de esta carpeta.
-2. Si trabajas desde este equipo con Codex, ejecuta `./start.cmd`. El iniciador usa el Node.js incluido con Codex y no requiere npm.
+2. Verifica que Node.js 20 o superior esté instalado y ejecuta `./start.cmd`.
 3. Abre `http://localhost:3000`.
 
 ## Accesos de demostración

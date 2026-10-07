@@ -1,27 +1,31 @@
 # Base de datos de CompraLatino
 
-Esta carpeta concentra la instalación y los archivos modulares de Microsoft SQL
-Server:
+## Instalador integral
 
-- `CompraLatino.sql`: instalador completo e idempotente. Crea la base, las tablas,
-  relaciones, restricciones, índices y datos iniciales.
-- `schema.sql`: solamente la estructura de una base existente.
-- `seed.sql`: solamente los datos iniciales.
-
-## Instalación completa
-
-Desde una terminal con acceso administrativo local a SQL Server:
+- **Archivo:** `CompraLatino.sql`.
+- **Función:** creación idempotente de la base `CompraLatino`.
+- **Objetos:** tablas, relaciones, restricciones e índices.
+- **Datos iniciales:** usuarios demostrativos, categorías y productos.
+- **Reejecución:** conservación de objetos y registros existentes.
 
 ```powershell
 sqlcmd -S localhost -E -C -b -i database\CompraLatino.sql
 ```
 
-`-E` utiliza la identidad de Windows que ejecuta el comando. No se escribe un
-usuario ni una contraseña de SQL Server en el comando o en el repositorio.
+## Instalación modular
 
-## Conexión del backend sin credenciales visibles
+| Archivo | Función |
+| --- | --- |
+| `schema.sql` | Creación de tablas, relaciones, restricciones e índices |
+| `seed.sql` | Inserción idempotente de datos iniciales |
 
-La configuración local usa autenticación integrada de Windows:
+## Configuración de conexión
+
+- **Archivo:** `server/config/database.js`.
+- **Controlador local:** `mssql/msnodesqlv8`.
+- **Autenticación local:** identidad integrada de Windows.
+- **Parámetro ODBC:** `Trusted_Connection=Yes`.
+- **Pool:** conexiones reutilizables y tiempos límite configurables.
 
 ```dotenv
 SQLSERVER_HOST=localhost
@@ -31,18 +35,35 @@ SQLSERVER_TRUSTED_CONNECTION=true
 SQLSERVER_ODBC_DRIVER=ODBC Driver 18 for SQL Server
 ```
 
-El flujo de conexión es:
+## Seguridad de conexión
 
-1. `server/config/database.js` lee la configuración local.
-2. Cuando `SQLSERVER_TRUSTED_CONNECTION=true`, construye en memoria una conexión
-   ODBC con `Trusted_Connection=Yes`, sin usuario ni contraseña.
-3. `server/data/sqlserver-store.js` selecciona `mssql/msnodesqlv8` y abre el pool.
-4. El servidor verifica que existan `dbo.users` y `dbo.products` antes de aceptar
-   solicitudes HTTP.
+- `.env` excluido mediante `.gitignore`.
+- Conexión local sin usuario ni contraseña de SQL Server.
+- Credenciales remotas suministradas mediante variables del entorno o gestor de
+  secretos.
+- Cadenas de conexión y credenciales excluidas de los registros de ejecución.
 
-El archivo `.env` real está excluido mediante `.gitignore`. Para despliegues que
-requieran autenticación SQL, las credenciales deben almacenarse en variables del
-entorno o en un gestor de secretos, nunca en archivos versionados.
+## Seguridad de cuentas
 
-Los valores `password_hash` del script pertenecen a las cuentas demostrativas de
-la aplicación. Son hashes bcrypt y no son credenciales de conexión a SQL Server.
+- Columna `dbo.users.password_hash` de tipo `VARCHAR(255)`.
+- Hash bcrypt con sal y factor de costo `12`.
+- Contraseñas en texto plano excluidas del esquema y datos iniciales.
+- Hashes de aplicación independientes de credenciales de SQL Server.
+
+## Objetos del esquema
+
+| Tabla | Función |
+| --- | --- |
+| `dbo.users` | Cuentas, roles y perfiles |
+| `dbo.categories` | Categorías del catálogo |
+| `dbo.products` | Inventario y estado de pujas |
+| `dbo.orders` | Compras y ofertas registradas |
+| `dbo.product_events` | Eventos y auditoría funcional |
+
+## Restricciones principales
+
+- Usuario y correo únicos.
+- Roles limitados a `customer`, `seller` y `admin`.
+- Montos y contadores no negativos.
+- Estados de orden controlados mediante `CHECK`.
+- Productos y órdenes relacionados mediante llaves foráneas.

@@ -1,4 +1,8 @@
-const sql = require('mssql');
+const { databaseDriver } = require('../config/database');
+
+const sql = databaseDriver() === 'msnodesqlv8'
+  ? require('mssql/msnodesqlv8')
+  : require('mssql');
 
 function dateOnly(value) {
   if (!value) return '';

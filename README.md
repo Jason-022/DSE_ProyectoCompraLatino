@@ -33,13 +33,24 @@ Las rutas visibles no exponen nombres de archivos: `/administracion`, `/administ
 
 La persistencia está preparada para Microsoft SQL Server 2022 y versiones compatibles. El esquema incluye usuarios, vendedores, productos, categorías, órdenes y eventos.
 
+La forma más rápida de instalarla es ejecutar `database/CompraLatino.sql` desde
+SQL Server Management Studio o `sqlcmd`. El archivo crea la base de datos
+`CompraLatino`, instala tablas, relaciones e índices y carga los datos iniciales.
+Se puede volver a ejecutar sin duplicar esos datos.
+
+Como alternativa modular:
+
 1. Crea una base de datos llamada `CompraLatino` en SQL Server.
 2. Ejecuta `database/schema.sql` sobre esa base.
 3. Ejecuta `database/seed.sql` para cargar las cuentas y productos de demostración.
-4. Copia `.env.example` a `.env` y define el servidor, base, usuario y contraseña.
+4. Copia `.env.example` a `.env` y define el servidor y la base de datos.
 5. Ejecuta `npm start`.
 
-El controlador utiliza conexiones TCP y un pool reutilizable. Para una instancia local con certificado autofirmado puede mantenerse `SQLSERVER_TRUST_SERVER_CERTIFICATE=true`; en un entorno productivo se recomienda cifrado con un certificado válido.
+En Windows, la configuración de ejemplo utiliza autenticación integrada mediante
+`msnodesqlv8`, por lo que no guarda una contraseña y no requiere habilitar TCP en
+una instancia local. Para un servidor remoto puede utilizarse el controlador
+`tedious` con autenticación SQL y TCP. Ambos controladores usan un pool
+reutilizable. En producción se recomienda cifrado con un certificado válido.
 
 Cuando las variables de SQL Server no están completas, el backend inicia automáticamente en modo demostración. Los usuarios y sus cambios se conservan en `server/data/mock-users.json`; el resto de los datos simulados se reinicia con el servidor. Si las variables están definidas, la aplicación exige una conexión válida y verifica que el esquema exista antes de abrir el servidor HTTP.
 

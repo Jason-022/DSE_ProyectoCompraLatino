@@ -36,7 +36,8 @@ La persistencia está preparada para Microsoft SQL Server 2022 y versiones compa
 La forma más rápida de instalarla es ejecutar `database/CompraLatino.sql` desde
 SQL Server Management Studio o `sqlcmd`. El archivo crea la base de datos
 `CompraLatino`, instala tablas, relaciones e índices y carga los datos iniciales.
-Se puede volver a ejecutar sin duplicar esos datos.
+Se puede volver a ejecutar sin duplicar esos datos. La conexión sin credenciales
+y el contenido de cada script están documentados en `database/README.md`.
 
 Como alternativa modular:
 

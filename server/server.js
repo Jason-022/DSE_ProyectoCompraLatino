@@ -1,10 +1,10 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { randomUUID, createHash } = require('crypto');
-const { products, dashboard, users } = require('./mock-data');
+const { randomUUID } = require('crypto');
 const { viewFor, redirectForLegacyView } = require('./controllers/page-controller');
-const { databaseEnabled } = require('./config/database');
+const { createStore } = require('./data/store');
+const { hashPassword, isBcryptHash, verifyPassword } = require('./passwords');
 
 const publicDirectory = path.join(__dirname, '..', 'web');
 const mimeTypes = {
@@ -15,6 +15,9 @@ const mimeTypes = {
   '.svg': 'image/svg+xml'
 };
 
+let store;
+let server;
+
 function json(response, status, body) {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   response.end(JSON.stringify(body));
@@ -23,27 +26,30 @@ function json(response, status, body) {
 function readJson(request) {
   return new Promise((resolve, reject) => {
     let rawBody = '';
-    request.on('data', (chunk) => { rawBody += chunk; });
+    request.on('data', (chunk) => {
+      rawBody += chunk;
+      if (rawBody.length > 1048576) request.destroy(new Error('La solicitud supera el límite permitido.'));
+    });
     request.on('end', () => {
       try { resolve(JSON.parse(rawBody || '{}')); } catch { reject(new Error('Solicitud inválida.')); }
     });
+    request.on('error', reject);
   });
 }
-
-function hashPassword(password) { return createHash('sha256').update(String(password)).digest('hex'); }
 
 function publicUser(user) {
   const { passwordHash, ...safeUser } = user;
   return safeUser;
 }
 
-function requestingUser(request) {
+async function requestingUser(request) {
   const username = request.headers['x-compralatino-user'];
-  return users.find((user) => user.username === username);
+  if (!username) return null;
+  return store.findUserByUsername(username);
 }
 
-function requireRole(request, response, roles) {
-  const user = requestingUser(request);
+async function requireRole(request, response, roles) {
+  const user = await requestingUser(request);
   if (!user || !roles.includes(user.role)) {
     json(response, 403, { error: 'No tienes permisos para realizar esta acción.' });
     return null;
@@ -65,8 +71,12 @@ function serveFile(requestPath, response) {
   });
 }
 
-const server = http.createServer((request, response) => {
-  const url = new URL(request.url, `http://${request.headers.host}`);
+function validRole(role) {
+  return ['customer', 'seller', 'admin'].includes(role);
+}
+
+async function handleRequest(request, response) {
+  const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
 
   const legacyLocation = request.method === 'GET' ? redirectForLegacyView(url.pathname) : null;
   if (legacyLocation) {
@@ -75,111 +85,232 @@ const server = http.createServer((request, response) => {
   }
 
   if (request.method === 'GET' && url.pathname === '/api/products') {
-    const query = (url.searchParams.get('q') || '').toLowerCase();
-    const category = url.searchParams.get('category');
-    const result = products.filter((product) =>
-      (!query || `${product.title} ${product.category}`.toLowerCase().includes(query)) &&
-      (!category || category === 'Todos' || product.category === category)
-    );
+    const result = await store.getProducts({
+      query: url.searchParams.get('q') || '',
+      category: url.searchParams.get('category') || ''
+    });
     return json(response, 200, result);
   }
 
   if (request.method === 'GET' && url.pathname === '/api/dashboard') {
-    if (!requireRole(request, response, ['admin'])) return;
-    return json(response, 200, dashboard);
+    if (!await requireRole(request, response, ['admin'])) return;
+    return json(response, 200, await store.getDashboard());
   }
 
   if (request.method === 'POST' && url.pathname === '/api/auth/login') {
-    return readJson(request).then(({ username, password }) => {
-      const user = users.find((item) => item.username.toLowerCase() === String(username).trim().toLowerCase() && item.passwordHash === hashPassword(password));
-      if (!user) return json(response, 401, { error: 'Usuario o contraseña incorrectos.' });
-      return json(response, 200, { user: publicUser(user) });
-    }).catch((error) => json(response, 400, { error: error.message }));
+    const { username, password } = await readJson(request);
+    const user = await store.findUserByUsername(username);
+    if (!user || !await verifyPassword(password, user.passwordHash)) {
+      return json(response, 401, { error: 'Usuario o contraseña incorrectos.' });
+    }
+    if (!isBcryptHash(user.passwordHash)) {
+      user.passwordHash = await hashPassword(password);
+      await store.updateUser(user.username, { passwordHash: user.passwordHash });
+    }
+    return json(response, 200, { user: publicUser(user) });
   }
 
   if (request.method === 'POST' && url.pathname === '/api/auth/register') {
-    return readJson(request).then((body) => {
-      const fields = ['username', 'email', 'firstName', 'lastName', 'phone', 'birthDate', 'password'];
-      if (fields.some((field) => !String(body[field] || '').trim())) return json(response, 422, { error: 'Completa todos los campos requeridos.' });
-      if (users.some((user) => user.username.toLowerCase() === body.username.trim().toLowerCase())) return json(response, 409, { error: 'Ese nombre de usuario ya está en uso.' });
-      if (users.some((user) => user.email.toLowerCase() === body.email.trim().toLowerCase())) return json(response, 409, { error: 'Ese correo ya está registrado.' });
-      if (String(body.password).length < 8) return json(response, 422, { error: 'La contraseña debe tener al menos 8 caracteres.' });
-      const user = { id: randomUUID(), username: body.username.trim(), passwordHash: hashPassword(body.password), email: body.email.trim(), firstName: body.firstName.trim(), lastName: body.lastName.trim(), phone: body.phone.trim(), birthDate: body.birthDate, role: 'customer' };
-      users.push(user);
-      return json(response, 201, { user: publicUser(user) });
-    }).catch((error) => json(response, 400, { error: error.message }));
+    const body = await readJson(request);
+    const fields = ['username', 'email', 'firstName', 'lastName', 'phone', 'birthDate', 'password'];
+    if (fields.some((field) => !String(body[field] || '').trim())) {
+      return json(response, 422, { error: 'Completa todos los campos requeridos.' });
+    }
+    if (await store.findUserByUsername(body.username)) return json(response, 409, { error: 'Ese nombre de usuario ya está en uso.' });
+    if (await store.findUserByEmail(body.email)) return json(response, 409, { error: 'Ese correo ya está registrado.' });
+    if (String(body.password).length < 8) return json(response, 422, { error: 'La contraseña debe tener al menos 8 caracteres.' });
+    if (body.passwordConfirmation !== undefined && body.password !== body.passwordConfirmation) {
+      return json(response, 422, { error: 'Las contraseñas no coinciden.' });
+    }
+
+    const user = await store.createUser({
+      id: randomUUID(),
+      username: body.username.trim(),
+      passwordHash: await hashPassword(body.password),
+      email: body.email.trim(),
+      firstName: body.firstName.trim(),
+      lastName: body.lastName.trim(),
+      phone: body.phone.trim(),
+      birthDate: body.birthDate,
+      role: 'customer'
+    });
+    return json(response, 201, { user: publicUser(user) });
   }
 
   if (request.method === 'PATCH' && url.pathname === '/api/profile') {
-    const user = requestingUser(request);
-    if (!user) return json(response, 401, { error: 'Debes iniciar sesión para actualizar tu perfil.' });
-    return readJson(request).then((body) => {
-      const fields = ['email', 'firstName', 'lastName', 'phone', 'birthDate'];
-      if (fields.some((field) => !String(body[field] || '').trim())) return json(response, 422, { error: 'Completa todos los campos del perfil.' });
-      if (users.some((item) => item.username !== user.username && item.email.toLowerCase() === body.email.trim().toLowerCase())) return json(response, 409, { error: 'Ese correo ya está registrado.' });
-      fields.forEach((field) => { user[field] = String(body[field]).trim(); });
-      if (body.password) {
-        if (String(body.password).length < 8) return json(response, 422, { error: 'La contraseña debe tener al menos 8 caracteres.' });
-        user.passwordHash = hashPassword(body.password);
-      }
-      return json(response, 200, { user: publicUser(user) });
-    }).catch((error) => json(response, 400, { error: error.message }));
+    const currentUser = await requestingUser(request);
+    if (!currentUser) return json(response, 401, { error: 'Debes iniciar sesión para actualizar tu perfil.' });
+
+    const body = await readJson(request);
+    const fields = ['username', 'email', 'firstName', 'lastName', 'phone', 'birthDate'];
+    if (fields.some((field) => !String(body[field] || '').trim())) {
+      return json(response, 422, { error: 'Completa todos los campos del perfil.' });
+    }
+    if (body.password && String(body.password).length < 8) {
+      return json(response, 422, { error: 'La contraseña debe tener al menos 8 caracteres.' });
+    }
+    if (body.password && body.passwordConfirmation !== undefined && body.password !== body.passwordConfirmation) {
+      return json(response, 422, { error: 'Las contraseñas nuevas no coinciden.' });
+    }
+    const usernameOwner = await store.findUserByUsername(body.username);
+    if (usernameOwner && usernameOwner.username !== currentUser.username) {
+      return json(response, 409, { error: 'Ese nombre de usuario ya está en uso.' });
+    }
+    const emailOwner = await store.findUserByEmail(body.email);
+    if (emailOwner && emailOwner.username !== currentUser.username) {
+      return json(response, 409, { error: 'Ese correo ya está registrado.' });
+    }
+
+    const changes = Object.fromEntries(fields.map((field) => [field, String(body[field]).trim()]));
+    if (body.password) changes.passwordHash = await hashPassword(body.password);
+    const user = await store.updateUser(currentUser.username, changes);
+    return json(response, 200, { user: publicUser(user) });
   }
 
   if (request.method === 'GET' && url.pathname === '/api/users') {
-    if (!requireRole(request, response, ['admin'])) return;
+    if (!await requireRole(request, response, ['admin'])) return;
+    const users = await store.getUsers();
     return json(response, 200, users.map(publicUser));
   }
 
   if (request.method === 'POST' && url.pathname === '/api/users') {
-    if (!requireRole(request, response, ['admin'])) return;
-    return readJson(request).then((body) => {
-      if (!body.username || !body.password || !body.email || !body.firstName || !body.lastName || !body.role) return json(response, 422, { error: 'Completa los datos del usuario.' });
-      if (!['customer', 'seller', 'admin'].includes(body.role)) return json(response, 422, { error: 'Rol inválido.' });
-      if (users.some((user) => user.username.toLowerCase() === body.username.toLowerCase() || user.email.toLowerCase() === body.email.toLowerCase())) return json(response, 409, { error: 'El usuario o correo ya existe.' });
-      const user = { id: randomUUID(), username: body.username.trim(), passwordHash: hashPassword(body.password), email: body.email.trim(), firstName: body.firstName.trim(), lastName: body.lastName.trim(), phone: body.phone || '', birthDate: body.birthDate || '', role: body.role };
-      users.push(user);
-      return json(response, 201, { user: publicUser(user) });
-    }).catch((error) => json(response, 400, { error: error.message }));
+    if (!await requireRole(request, response, ['admin'])) return;
+    const body = await readJson(request);
+    if (!body.username || !body.password || !body.email || !body.firstName || !body.lastName || !body.role) {
+      return json(response, 422, { error: 'Completa los datos del usuario.' });
+    }
+    if (!validRole(body.role)) return json(response, 422, { error: 'Rol inválido.' });
+    if (String(body.password).length < 8) return json(response, 422, { error: 'La contraseña debe tener al menos 8 caracteres.' });
+    if (body.passwordConfirmation !== undefined && body.password !== body.passwordConfirmation) {
+      return json(response, 422, { error: 'Las contraseñas no coinciden.' });
+    }
+    if (await store.findUserByUsername(body.username) || await store.findUserByEmail(body.email)) {
+      return json(response, 409, { error: 'El usuario o correo ya existe.' });
+    }
+
+    const user = await store.createUser({
+      id: randomUUID(),
+      username: body.username.trim(),
+      passwordHash: await hashPassword(body.password),
+      email: body.email.trim(),
+      firstName: body.firstName.trim(),
+      lastName: body.lastName.trim(),
+      phone: String(body.phone || '').trim(),
+      birthDate: body.birthDate || '',
+      role: body.role
+    });
+    return json(response, 201, { user: publicUser(user) });
   }
 
   if (request.method === 'PATCH' && url.pathname.startsWith('/api/users/')) {
-    if (!requireRole(request, response, ['admin'])) return;
+    if (!await requireRole(request, response, ['admin'])) return;
     const username = decodeURIComponent(url.pathname.replace('/api/users/', ''));
-    return readJson(request).then((body) => {
-      const user = users.find((item) => item.username === username);
-      if (!user) return json(response, 404, { error: 'Usuario no encontrado.' });
-      ['email', 'firstName', 'lastName', 'phone', 'birthDate', 'role'].forEach((field) => { if (body[field] !== undefined) user[field] = body[field]; });
-      if (body.password) user.passwordHash = hashPassword(body.password);
-      return json(response, 200, { user: publicUser(user) });
-    }).catch((error) => json(response, 400, { error: error.message }));
+    const currentUser = await store.findUserByUsername(username);
+    if (!currentUser) return json(response, 404, { error: 'Usuario no encontrado.' });
+
+    const body = await readJson(request);
+    if (body.role !== undefined && !validRole(body.role)) return json(response, 422, { error: 'Rol inválido.' });
+    const nextUsername = String(body.username || currentUser.username).trim();
+    if (!nextUsername || !String(body.email || '').trim() || !String(body.firstName || '').trim() || !String(body.lastName || '').trim()) {
+      return json(response, 422, { error: 'Completa los datos del usuario.' });
+    }
+    if (body.password && String(body.password).length < 8) {
+      return json(response, 422, { error: 'La contraseña debe tener al menos 8 caracteres.' });
+    }
+    if (body.password && body.passwordConfirmation !== undefined && body.password !== body.passwordConfirmation) {
+      return json(response, 422, { error: 'Las contraseñas nuevas no coinciden.' });
+    }
+    if (nextUsername.toLowerCase() !== currentUser.username.toLowerCase()) {
+      const usernameOwner = await store.findUserByUsername(nextUsername);
+      if (usernameOwner) return json(response, 409, { error: 'Ese nombre de usuario ya está en uso.' });
+    }
+    if (body.email !== undefined) {
+      const emailOwner = await store.findUserByEmail(body.email);
+      if (emailOwner && emailOwner.username !== username) return json(response, 409, { error: 'Ese correo ya está registrado.' });
+    }
+
+    const changes = { username: nextUsername };
+    for (const field of ['email', 'firstName', 'lastName', 'phone', 'birthDate', 'role']) {
+      if (body[field] !== undefined) changes[field] = typeof body[field] === 'string' ? body[field].trim() : body[field];
+    }
+    if (body.password) changes.passwordHash = await hashPassword(body.password);
+    const user = await store.updateUser(username, changes);
+    return json(response, 200, { user: publicUser(user) });
   }
 
   if (request.method === 'POST' && url.pathname === '/api/bids') {
-    if (!requestingUser(request)) return json(response, 401, { error: 'Debes iniciar sesión para hacer una oferta.' });
-    return readJson(request).then((bid) => {
-        const product = products.find((item) => item.id === bid.productId);
-        if (!product || Number(bid.amount) <= product.currentBid) return json(response, 422, { error: 'La puja debe superar la oferta actual.' });
-        product.currentBid = Number(bid.amount);
-        product.bids += 1;
-        return json(response, 201, { message: 'Puja registrada en modo demostración.', product });
-    }).catch((error) => json(response, 400, { error: error.message }));
+    const user = await requestingUser(request);
+    if (!user) return json(response, 401, { error: 'Debes iniciar sesión para hacer una oferta.' });
+    const bid = await readJson(request);
+    const amount = Number(bid.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return json(response, 422, { error: 'La puja debe ser un monto numérico válido.' });
+    }
+    const product = await store.placeBid(bid.productId, amount, user.id);
+    if (!product) return json(response, 422, { error: 'La puja debe superar la oferta actual.' });
+    return json(response, 201, { message: store.kind === 'sqlserver' ? 'Puja registrada.' : 'Puja registrada en modo demostración.', product });
   }
 
   if (request.method === 'PATCH' && url.pathname.startsWith('/api/products/')) {
-    if (!requireRole(request, response, ['admin', 'seller'])) return;
+    if (!await requireRole(request, response, ['admin', 'seller'])) return;
     const productId = decodeURIComponent(url.pathname.replace('/api/products/', ''));
-    return readJson(request).then((body) => {
-      const product = products.find((item) => item.id === productId);
-      if (!product) return json(response, 404, { error: 'Producto no encontrado.' });
-      ['title', 'category', 'price', 'currentBid', 'shipping', 'badge'].forEach((field) => { if (body[field] !== undefined) product[field] = body[field]; });
-      return json(response, 200, { product });
-    }).catch((error) => json(response, 400, { error: error.message }));
+    const body = await readJson(request);
+    const changes = {};
+    for (const field of ['title', 'category', 'badge']) {
+      if (body[field] !== undefined) {
+        const value = String(body[field]).trim();
+        if (!value) return json(response, 422, { error: `${field} no puede estar vacío.` });
+        changes[field] = value;
+      }
+    }
+    for (const field of ['price', 'currentBid', 'shipping']) {
+      if (body[field] === undefined) continue;
+      const value = Number(body[field]);
+      if (!Number.isFinite(value) || value < 0) return json(response, 422, { error: `${field} debe ser un número válido.` });
+      changes[field] = value;
+    }
+    const product = await store.updateProduct(productId, changes);
+    if (!product) return json(response, 404, { error: 'Producto no encontrado.' });
+    return json(response, 200, { product });
   }
 
   if (request.method !== 'GET') return json(response, 405, { error: 'Método no permitido' });
-  serveFile(url.pathname, response);
-});
+  return serveFile(url.pathname, response);
+}
 
-const port = process.env.PORT || 3000;
-server.listen(port, () => console.log(`CompraLatino disponible en http://localhost:${port} (${databaseEnabled() ? 'PostgreSQL configurado' : 'modo demostración'})`));
+async function start() {
+  store = await createStore();
+  const port = Number(process.env.PORT || 3000);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) throw new Error('PORT debe ser un puerto TCP válido.');
+
+  server = http.createServer((request, response) => {
+    handleRequest(request, response).catch((error) => {
+      console.error('Error al procesar la solicitud:', error.message);
+      if (!response.headersSent) json(response, 500, { error: 'Ocurrió un error interno.' });
+      else response.end();
+    });
+  });
+
+  await new Promise((resolve, reject) => {
+    const onError = (error) => reject(error);
+    server.once('error', onError);
+    server.listen(port, () => {
+      server.off('error', onError);
+      resolve();
+    });
+  });
+  console.log(`CompraLatino disponible en http://localhost:${port} (${store.kind === 'sqlserver' ? 'SQL Server conectado' : 'modo demostración'})`);
+}
+
+async function shutdown() {
+  if (server?.listening) await new Promise((resolve) => server.close(resolve));
+  if (store) await store.close();
+}
+
+process.once('SIGINT', () => shutdown().finally(() => process.exit(0)));
+process.once('SIGTERM', () => shutdown().finally(() => process.exit(0)));
+
+start().catch((error) => {
+  console.error(`No fue posible iniciar CompraLatino: ${error.message}`);
+  process.exitCode = 1;
+});

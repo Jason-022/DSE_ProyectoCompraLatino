@@ -90,19 +90,19 @@ const dashboard = {
 
 const users = [
   {
-    id: 'usr-admin-dse', username: 'adminDSE', passwordHash: '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', email: 'admin.dse@compralatino.demo',
+    id: 'usr-admin-dse', username: 'adminDSE', passwordHash: '$2b$12$ddMvojWaBc5fnnMzKLuwVueGFCyCZ4o2.I7l8qbC4Hbf4k0cAjzHS', email: 'admin.dse@compralatino.demo',
     firstName: 'Administrador', lastName: 'DSE', phone: '7000-0001', birthDate: '1995-01-01', role: 'admin'
   },
   {
-    id: 'usr-admin-user', username: 'adminUser', passwordHash: '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', email: 'admin.user@compralatino.demo',
+    id: 'usr-admin-user', username: 'adminUser', passwordHash: '$2b$12$dl0HQkkbRYAPuySqKf9PsuvbXRjUd6wcQPiSepDJ.3EfSx5ZRauaC', email: 'admin.user@compralatino.demo',
     firstName: 'Administrador', lastName: 'Usuarios', phone: '7000-0002', birthDate: '1994-02-02', role: 'admin'
   },
   {
-    id: 'usr-admin-sales', username: 'adminSales', passwordHash: '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', email: 'admin.sales@compralatino.demo',
+    id: 'usr-admin-sales', username: 'adminSales', passwordHash: '$2b$12$EhZwnL6jmLwQ0mId/MxMSumK93JXugvS9cUlC4kyc4BFG/z6gvs5m', email: 'admin.sales@compralatino.demo',
     firstName: 'Administrador', lastName: 'Ventas', phone: '7000-0003', birthDate: '1993-03-03', role: 'admin'
   },
   {
-    id: 'usr-customer-demo', username: 'clienteDemo', passwordHash: 'a60b85d409a01d46023f90741e01b79543a3cb1ba048eaefbe5d7a63638043bf', email: 'cliente.demo@compralatino.demo',
+    id: 'usr-customer-demo', username: 'clienteDemo', passwordHash: '$2b$12$MFyAiYS4zAMS/GNiA/xrx.hXViAzYrDSpMt9qmhmfv9ngRT/CyNEO', email: 'cliente.demo@compralatino.demo',
     firstName: 'Cliente', lastName: 'Demo', phone: '7000-0004', birthDate: '1998-05-12', role: 'customer'
   }
 ];

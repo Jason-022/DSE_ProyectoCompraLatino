@@ -5,9 +5,16 @@
   "description": "Prototipo web de CompraLatino para compras y pujas en YAuctions",
   "scripts": {
     "start": "node server/server.js",
-    "dev": "node --watch server/server.js"
+    "dev": "node --watch server/server.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "dotenv": "^18.0.5",
+    "msnodesqlv8": "^5.5.0",
+    "mssql": "^12.7.4"
   }
 }

@@ -57,6 +57,38 @@ function mapProduct(row) {
   };
 }
 
+function mapSale(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    customer: {
+      id: row.customerId,
+      username: row.customerUsername,
+      firstName: row.customerFirstName,
+      lastName: row.customerLastName,
+      email: row.customerEmail
+    },
+    seller: row.sellerId ? {
+      id: row.sellerId,
+      username: row.sellerUsername,
+      firstName: row.sellerFirstName,
+      lastName: row.sellerLastName
+    } : null,
+    product: {
+      id: row.productId,
+      title: row.productTitle
+    },
+    quantity: Number(row.quantity),
+    unitPrice: Number(row.unitPrice),
+    serviceFee: Number(row.serviceFee),
+    shippingFee: Number(row.shippingFee),
+    total: Number(row.total),
+    status: row.status,
+    notes: row.notes || '',
+    createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt
+  };
+}
+
 const productSelect = `
   SELECT p.id,
          p.title,
@@ -71,6 +103,32 @@ const productSelect = `
   FROM dbo.products p
   INNER JOIN dbo.categories c ON c.id = p.category_id`;
 
+const saleSelect = `
+  SELECT o.id,
+         customer.id AS customerId,
+         customer.username AS customerUsername,
+         customer.first_name AS customerFirstName,
+         customer.last_name AS customerLastName,
+         customer.email AS customerEmail,
+         seller.id AS sellerId,
+         seller.username AS sellerUsername,
+         seller.first_name AS sellerFirstName,
+         seller.last_name AS sellerLastName,
+         p.id AS productId,
+         p.title AS productTitle,
+         o.quantity,
+         COALESCE(o.unit_price, o.bid_amount, p.price, 0) AS unitPrice,
+         o.service_fee AS serviceFee,
+         o.shipping_fee AS shippingFee,
+         (o.quantity * COALESCE(o.unit_price, o.bid_amount, p.price, 0)) + o.service_fee + o.shipping_fee AS total,
+         o.status,
+         o.notes,
+         o.created_at AS createdAt
+  FROM dbo.orders o
+  INNER JOIN dbo.users customer ON customer.id = o.user_id
+  LEFT JOIN dbo.users seller ON seller.id = o.seller_id
+  INNER JOIN dbo.products p ON p.id = o.product_id`;
+
 class SqlServerStore {
   constructor(configuration) {
     this.kind = 'sqlserver';
@@ -80,23 +138,31 @@ class SqlServerStore {
 
   async connect() {
     await this.pool.connect();
-    const result = await this.pool.request().query("SELECT OBJECT_ID(N'dbo.users', N'U') AS usersTable, OBJECT_ID(N'dbo.products', N'U') AS productsTable");
+    const result = await this.pool.request().query(`
+      SELECT OBJECT_ID(N'dbo.users', N'U') AS usersTable,
+             OBJECT_ID(N'dbo.products', N'U') AS productsTable,
+             OBJECT_ID(N'dbo.orders', N'U') AS ordersTable,
+             COL_LENGTH(N'dbo.orders', N'seller_id') AS sellerColumn,
+             COL_LENGTH(N'dbo.orders', N'quantity') AS quantityColumn,
+             COL_LENGTH(N'dbo.orders', N'unit_price') AS unitPriceColumn`);
     const state = result.recordset[0];
-    if (!state.usersTable || !state.productsTable) {
-      throw new Error('La base de datos no tiene el esquema de CompraLatino. Ejecuta database/schema.sql y database/seed.sql.');
+    if (!state.usersTable || !state.productsTable || !state.ordersTable || !state.sellerColumn || !state.quantityColumn || !state.unitPriceColumn) {
+      throw new Error('La base de datos no tiene el esquema actualizado de CompraLatino. Ejecuta database/CompraLatino.sql.');
     }
     return this;
   }
 
-  async getProducts({ query = '', category = '' } = {}) {
+  async getProducts({ query = '', category = '', includeArchived = false } = {}) {
     const normalizedQuery = String(query).trim();
     const request = this.pool.request();
     request.input('query', sql.NVarChar(300), normalizedQuery);
     request.input('search', sql.NVarChar(304), `%${normalizedQuery}%`);
     request.input('category', sql.NVarChar(100), String(category).trim());
+    request.input('includeArchived', sql.Bit, includeArchived ? 1 : 0);
     const result = await request.query(`${productSelect}
       WHERE (@query = N'' OR CONCAT(p.title, N' ', c.name) LIKE @search)
         AND (@category = N'' OR @category = N'Todos' OR c.name = @category)
+        AND (@includeArchived = 1 OR p.availability <> N'archived')
       ORDER BY p.auction_ends_at, p.title`);
     return result.recordset.map(mapProduct);
   }
@@ -112,7 +178,12 @@ class SqlServerStore {
     const [metricsResult, categoryResult] = await Promise.all([
       this.pool.request().query(`
         SELECT
-          COALESCE(SUM(CASE WHEN status IN ('won','paid','shipped','delivered') THEN bid_amount ELSE 0 END), 0) AS sales,
+          COALESCE(SUM(CASE WHEN status IN ('won','paid','shipped','delivered')
+            THEN CASE WHEN seller_id IS NOT NULL
+              THEN (quantity * COALESCE(unit_price, bid_amount, 0)) + service_fee + shipping_fee
+              ELSE COALESCE(bid_amount, 0)
+            END
+            ELSE 0 END), 0) AS sales,
           (SELECT COUNT(*) FROM dbo.products WHERE availability = 'active') AS activeBids,
           (SELECT COUNT(*) FROM dbo.users WHERE created_at >= DATEFROMPARTS(YEAR(SYSUTCDATETIME()), MONTH(SYSUTCDATETIME()), 1)) AS newUsers,
           COALESCE(100.0 * SUM(CASE WHEN status IN ('won','paid','shipped','delivered') THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 0) AS conversion
@@ -164,6 +235,16 @@ class SqlServerStore {
       SELECT id, username, password_hash AS passwordHash, email, first_name AS firstName,
              last_name AS lastName, phone, birth_date AS birthDate, role
       FROM dbo.users ORDER BY first_name, last_name, username`);
+    return result.recordset.map(mapUser);
+  }
+
+  async getCustomers() {
+    const result = await this.pool.request().query(`
+      SELECT id, username, password_hash AS passwordHash, email, first_name AS firstName,
+             last_name AS lastName, phone, birth_date AS birthDate, role
+      FROM dbo.users
+      WHERE role = N'customer'
+      ORDER BY first_name, last_name, username`);
     return result.recordset.map(mapUser);
   }
 
@@ -241,9 +322,89 @@ class SqlServerStore {
     }
   }
 
+  async getSales({ customerId = '' } = {}) {
+    const request = this.pool.request()
+      .input('customerId', sql.NVarChar(36), String(customerId || ''));
+    const result = await request.query(`${saleSelect}
+      WHERE o.seller_id IS NOT NULL
+        AND (@customerId = N'' OR CONVERT(NVARCHAR(36), o.user_id) = @customerId)
+      ORDER BY o.created_at DESC, o.id DESC`);
+    return result.recordset.map(mapSale);
+  }
+
+  async createSale(sale) {
+    const result = await this.pool.request()
+      .input('customerId', sql.UniqueIdentifier, sale.customerId)
+      .input('sellerId', sql.UniqueIdentifier, sale.sellerId)
+      .input('productId', sql.NVarChar(120), sale.productId)
+      .input('quantity', sql.Int, sale.quantity)
+      .input('unitPrice', sql.Decimal(18, 2), sale.unitPrice)
+      .input('serviceFee', sql.Decimal(18, 2), sale.serviceFee)
+      .input('shippingFee', sql.Decimal(18, 2), sale.shippingFee)
+      .input('status', sql.NVarChar(30), sale.status)
+      .input('notes', sql.NVarChar(500), sale.notes || null)
+      .query(`
+        DECLARE @saleId UNIQUEIDENTIFIER = NEWID();
+
+        IF EXISTS (SELECT 1 FROM dbo.users WHERE id = @customerId AND role = N'customer')
+          AND EXISTS (SELECT 1 FROM dbo.products WHERE id = @productId AND availability <> N'archived')
+        BEGIN
+          INSERT INTO dbo.orders
+            (id, user_id, seller_id, product_id, status, bid_amount, quantity, unit_price,
+             service_fee, shipping_fee, notes, order_source)
+          VALUES
+            (@saleId, @customerId, @sellerId, @productId, @status, @unitPrice, @quantity,
+             @unitPrice, @serviceFee, @shippingFee, @notes, N'manual_sale');
+
+          SELECT @saleId AS id;
+        END`);
+
+    const saleId = result.recordset?.[0]?.id;
+    if (!saleId) return null;
+    const created = await this.pool.request()
+      .input('saleId', sql.UniqueIdentifier, saleId)
+      .query(`${saleSelect} WHERE o.id = @saleId`);
+    return mapSale(created.recordset[0]);
+  }
+
+  async createProduct(product) {
+    const transaction = new sql.Transaction(this.pool);
+    await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
+    try {
+      const categoryResult = await new sql.Request(transaction)
+        .input('category', sql.NVarChar(100), product.category)
+        .query(`IF NOT EXISTS (SELECT 1 FROM dbo.categories WHERE name = @category)
+                  INSERT INTO dbo.categories (name) VALUES (@category);
+                SELECT id FROM dbo.categories WHERE name = @category;`);
+      const categoryId = categoryResult.recordset[0].id;
+
+      await new sql.Request(transaction)
+        .input('id', sql.NVarChar(120), product.id)
+        .input('categoryId', sql.Int, categoryId)
+        .input('title', sql.NVarChar(255), product.title)
+        .input('description', sql.NVarChar(sql.MAX), product.description || null)
+        .input('image', sql.NVarChar(1000), product.image || null)
+        .input('price', sql.Decimal(18, 2), product.price)
+        .input('currentBid', sql.Decimal(18, 2), product.currentBid)
+        .input('shipping', sql.Decimal(18, 2), product.shipping)
+        .input('badge', sql.NVarChar(60), product.badge)
+        .query(`INSERT INTO dbo.products
+                  (id, category_id, title, description, image_url, price, current_bid,
+                   shipping_fee, badge, auction_ends_at, availability)
+                VALUES
+                  (@id, @categoryId, @title, @description, @image, @price, @currentBid,
+                   @shipping, @badge, DATEADD(DAY, 7, SYSUTCDATETIME()), N'active')`);
+      await transaction.commit();
+      return this.getProductById(product.id);
+    } catch (error) {
+      await transaction.rollback().catch(() => {});
+      throw error;
+    }
+  }
+
   async updateProduct(productId, changes) {
     const transaction = new sql.Transaction(this.pool);
-    await transaction.begin();
+    await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
     try {
       let categoryId;
       if (changes.category !== undefined) {
@@ -262,7 +423,8 @@ class SqlServerStore {
         price: ['price', sql.Decimal(12, 2)],
         currentBid: ['current_bid', sql.Decimal(12, 2)],
         shipping: ['shipping_fee', sql.Decimal(12, 2)],
-        badge: ['badge', sql.NVarChar(80)]
+        badge: ['badge', sql.NVarChar(80)],
+        image: ['image_url', sql.NVarChar(1000)]
       };
       for (const [field, [column, type]] of Object.entries(fields)) {
         if (changes[field] === undefined) continue;
@@ -270,7 +432,7 @@ class SqlServerStore {
         assignments.push(`${column} = @${field}`);
       }
       if (categoryId) {
-        request.input('categoryId', sql.UniqueIdentifier, categoryId);
+        request.input('categoryId', sql.Int, categoryId);
         assignments.push('category_id = @categoryId');
       }
       if (!assignments.length) {
@@ -289,6 +451,16 @@ class SqlServerStore {
       await transaction.rollback().catch(() => {});
       throw error;
     }
+  }
+
+  async deleteProduct(productId) {
+    const result = await this.pool.request()
+      .input('productId', sql.NVarChar(120), productId)
+      .query(`UPDATE dbo.products
+              SET availability = N'archived', updated_at = SYSUTCDATETIME()
+              WHERE id = @productId AND availability <> N'archived';
+              SELECT @@ROWCOUNT AS affected;`);
+    return Boolean(result.recordset[0].affected);
   }
 
   async close() {

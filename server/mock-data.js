@@ -104,7 +104,13 @@ const users = [
   {
     id: 'usr-customer-demo', username: 'clienteDemo', passwordHash: '$2b$12$MFyAiYS4zAMS/GNiA/xrx.hXViAzYrDSpMt9qmhmfv9ngRT/CyNEO', email: 'cliente.demo@compralatino.demo',
     firstName: 'Cliente', lastName: 'Demo', phone: '7000-0004', birthDate: '1998-05-12', role: 'customer'
+  },
+  {
+    id: 'usr-seller-demo', username: 'vendedorDemo', passwordHash: '$2b$12$D6YdHkLwDyziCYROmVJKyenor5zEfPHBSgvwKGL0cKp4DqgNuK.g6', email: 'vendedor.demo@compralatino.demo',
+    firstName: 'Vendedor', lastName: 'Demo', phone: '7000-0005', birthDate: '1992-06-15', role: 'seller'
   }
 ];
 
-module.exports = { products, dashboard, users };
+const sales = [];
+
+module.exports = { products, dashboard, users, sales };

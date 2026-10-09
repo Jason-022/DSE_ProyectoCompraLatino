@@ -5,6 +5,7 @@ const cleanViews = {
   '/administracion': '/admin.html',
   '/administracion/usuarios': '/usuarios.html',
   '/administracion/productos': '/productos.html',
+  '/administracion/ventas': '/ventas.html',
   '/administracion/analiticas': '/analiticas.html',
   '/administracion/transacciones': '/transacciones.html',
   '/administracion/salud-api': '/salud-api.html',

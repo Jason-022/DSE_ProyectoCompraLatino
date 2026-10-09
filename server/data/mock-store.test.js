@@ -67,3 +67,48 @@ test('persiste usuarios en JSON sin reemplazar un hash omitido', async (context)
   assert.equal(updated.firstName, 'Cliente actualizado');
   assert.equal(updated.passwordHash, originalHash);
 });
+
+test('registra ventas asociadas al cliente, vendedor y producto', async () => {
+  const store = new MockStore({ persist: false });
+  const customer = await store.findUserByUsername('clienteDemo');
+  const seller = await store.findUserByUsername('vendedorDemo');
+  const product = await store.getProductById('ya-1001');
+  const sale = await store.createSale({
+    customerId: customer.id,
+    sellerId: seller.id,
+    productId: product.id,
+    quantity: 2,
+    unitPrice: 100,
+    serviceFee: 5,
+    shippingFee: 10,
+    status: 'paid',
+    notes: 'Venta de prueba'
+  });
+
+  assert.equal(sale.customer.id, customer.id);
+  assert.equal(sale.seller.id, seller.id);
+  assert.equal(sale.product.id, product.id);
+  assert.equal(sale.total, 215);
+  assert.deepEqual(await store.getSales({ customerId: customer.id }), [sale]);
+});
+
+test('permite crear, modificar y retirar productos del catálogo', async () => {
+  const store = new MockStore({ persist: false });
+  const product = {
+    id: `product-${randomUUID()}`,
+    title: 'Producto de prueba',
+    category: 'Pruebas',
+    price: 25,
+    currentBid: 20,
+    bids: 0,
+    shipping: 3,
+    image: '',
+    badge: 'Disponible'
+  };
+
+  await store.createProduct(product);
+  assert.equal((await store.getProductById(product.id)).title, product.title);
+  assert.equal((await store.updateProduct(product.id, { price: 30 })).price, 30);
+  assert.equal(await store.deleteProduct(product.id), true);
+  assert.equal(await store.getProductById(product.id), null);
+});

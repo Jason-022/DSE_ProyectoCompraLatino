@@ -23,15 +23,16 @@ La estructura sigue MVC: `web/` contiene las vistas, `server/controllers/` resue
 ## Accesos de demostración
 
 - Administradores: `adminDSE`, `adminUser` o `adminSales`; contraseña: `admin`.
+- Vendedor: `vendedorDemo`; contraseña: `vendedor`.
 - Cliente: `clienteDemo`; contraseña: `cliente`.
 
-Al iniciar sesión, un administrador abre directamente el panel ejecutivo. Desde su menú lateral cada opción abre una pantalla propia: usuarios y vendedores, productos, analíticas, transacciones, salud de API, reportes y configuración. Los vendedores acceden únicamente a la gestión de productos. Los usuarios pueden abrir `Mi perfil` desde el menú público para actualizar sus datos en una pantalla independiente.
+Al iniciar sesión, un administrador abre directamente el panel ejecutivo y tiene acceso a usuarios, ventas, productos, analíticas y configuración. El vendedor utiliza un portal separado con acceso exclusivo a ventas y productos; no puede consultar ni modificar la administración de usuarios. Los clientes pueden abrir `Mi perfil` para actualizar sus datos y consultar las ventas asociadas a su cuenta.
 
-Las rutas visibles no exponen nombres de archivos: `/administracion`, `/administracion/usuarios`, `/administracion/productos` y `/perfil`. Las direcciones antiguas con `.html` redirigen automáticamente a estas rutas.
+Las rutas visibles no exponen nombres de archivos: `/administracion`, `/administracion/usuarios`, `/administracion/ventas`, `/administracion/productos` y `/perfil`. Las direcciones antiguas con `.html` redirigen automáticamente a estas rutas.
 
 ## Microsoft SQL Server
 
-La persistencia está preparada para Microsoft SQL Server 2022 y versiones compatibles. El esquema incluye usuarios, vendedores, productos, categorías, órdenes y eventos.
+La persistencia está preparada para Microsoft SQL Server 2022 y versiones compatibles. El esquema incluye usuarios, vendedores, productos, categorías, ventas, órdenes y eventos. Las ventas manuales quedan asociadas al cliente, vendedor y producto dentro de `dbo.orders`.
 
 La forma más rápida de instalarla es ejecutar `database/CompraLatino.sql` desde
 SQL Server Management Studio o `sqlcmd`. El archivo crea la base de datos

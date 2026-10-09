@@ -104,3 +104,40 @@ button.user-item.selected{border-color:#22bca5;background:#eaf7f4}
   .access-page #accessRoot,.access-page .access-content{height:auto;min-height:0;overflow:visible}
   .access-page .access-card{margin:0}
 }
+
+/* Sales and inventory workspace */
+.sidebar-role{margin:1.25rem .6rem 0;color:#5f708a;font:700 .62rem 'DM Mono';letter-spacing:.12em}
+.sidebar-account small{color:#7f8ba0;font-size:.65rem}
+.form-stack textarea{width:100%;resize:vertical;border:1px solid #d5d9df;background:#fff;padding:.75rem;color:var(--ink);font:inherit;outline-color:var(--orange)}
+.three-fields{grid-template-columns:repeat(3,minmax(0,1fr))}
+.form-button-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:.75rem;align-items:center;margin-top:.35rem}
+.form-button-row .primary-button{margin:0}
+.danger-button{min-height:3rem;border:1px solid #e4b8b5;background:#fff;color:#b7453e;padding:.65rem 1rem;border-radius:.3rem;font-weight:800;font-size:.75rem}
+.danger-button:hover{background:#fff1f0;border-color:#c75850}
+.sale-total{display:flex;align-items:center;justify-content:space-between;margin:.4rem 0;padding:1rem 1.1rem;border-left:.25rem solid #22bca5;background:#edf8f6}
+.sale-total span{color:#526073;font-size:.75rem;font-weight:700}
+.sale-total strong{font:700 1.4rem 'Playfair Display'}
+.sales-list{display:grid;gap:.75rem;margin-top:1.25rem}
+.sale-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.65rem 1rem;padding:1rem;border:1px solid #ece8e1;background:#faf8f4}
+.sale-item>div:first-child{display:grid;gap:.25rem;min-width:0}
+.sale-item b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.78rem}
+.sale-item span{color:var(--muted);font-size:.68rem}
+.sale-item-meta{display:grid;justify-items:end;gap:.35rem}
+.sale-item-meta strong{font:700 1rem 'Playfair Display'}
+.sale-status{display:inline-flex;padding:.25rem .5rem;border-radius:1rem;font-weight:800}
+.status-paid{color:#8b6615!important;background:#fff3d4}.status-shipped{color:#386aa0!important;background:#e9f2fb}.status-delivered{color:#187c61!important;background:#e3f6ef}.status-cancelled{color:#b7453e!important;background:#ffebeb}
+.sale-item footer{grid-column:1/-1;display:flex;justify-content:space-between;flex-wrap:wrap;gap:.4rem;padding:.65rem 0 0;border-top:1px solid #e7e2da;background:transparent;color:var(--muted)}
+.sale-item footer span{font:.62rem 'DM Mono'}
+.sales-history-card,.product-directory{min-height:0!important}
+.profile-purchases{margin-top:1.5rem;padding:clamp(1.4rem,3vw,2rem);background:#fff;border:1px solid var(--line)}
+.profile-purchases h2{margin:0;font:700 1.6rem 'Playfair Display'}
+.profile-purchases>div>p:last-child{color:var(--muted);font-size:.78rem}
+.profile-purchases .sales-list{grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr))}
+
+@media(max-width:700px){
+  .three-fields{grid-template-columns:minmax(0,1fr)}
+  .form-button-row{grid-template-columns:minmax(0,1fr)}
+  .form-button-row .text-button{justify-self:start}
+  .sale-item{grid-template-columns:minmax(0,1fr)}
+  .sale-item-meta{justify-items:start}
+}

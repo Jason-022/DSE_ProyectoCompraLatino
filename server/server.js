@@ -42,6 +42,16 @@ function publicUser(user) {
   return safeUser;
 }
 
+function publicCustomer(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName
+  };
+}
+
 async function requestingUser(request) {
   const username = request.headers['x-compralatino-user'];
   if (!username) return null;
@@ -75,6 +85,19 @@ function validRole(role) {
   return ['customer', 'seller', 'admin'].includes(role);
 }
 
+function validSaleStatus(status) {
+  return ['paid', 'shipped', 'delivered', 'cancelled'].includes(status);
+}
+
+function nonNegativeNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function validUuid(value) {
+  return /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(String(value || ''));
+}
+
 async function handleRequest(request, response) {
   const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
 
@@ -85,6 +108,15 @@ async function handleRequest(request, response) {
   }
 
   if (request.method === 'GET' && url.pathname === '/api/products') {
+    const result = await store.getProducts({
+      query: url.searchParams.get('q') || '',
+      category: url.searchParams.get('category') || ''
+    });
+    return json(response, 200, result);
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/manage/products') {
+    if (!await requireRole(request, response, ['admin', 'seller'])) return;
     const result = await store.getProducts({
       query: url.searchParams.get('q') || '',
       category: url.searchParams.get('category') || ''
@@ -173,6 +205,50 @@ async function handleRequest(request, response) {
     return json(response, 200, users.map(publicUser));
   }
 
+  if (request.method === 'GET' && url.pathname === '/api/customers') {
+    if (!await requireRole(request, response, ['admin', 'seller'])) return;
+    const customers = await store.getCustomers();
+    return json(response, 200, customers.map(publicCustomer));
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/sales') {
+    if (!await requireRole(request, response, ['admin', 'seller'])) return;
+    return json(response, 200, await store.getSales());
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/my-sales') {
+    const currentUser = await requestingUser(request);
+    if (!currentUser) return json(response, 401, { error: 'Debes iniciar sesión para consultar tus compras.' });
+    return json(response, 200, await store.getSales({ customerId: currentUser.id }));
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/sales') {
+    const seller = await requireRole(request, response, ['admin', 'seller']);
+    if (!seller) return;
+    const body = await readJson(request);
+    const quantity = Number(body.quantity);
+    const unitPrice = nonNegativeNumber(body.unitPrice);
+    const serviceFee = nonNegativeNumber(body.serviceFee ?? 0);
+    const shippingFee = nonNegativeNumber(body.shippingFee ?? 0);
+    if (!validUuid(body.customerId) || !String(body.productId || '').trim() || String(body.productId).length > 120 || !Number.isInteger(quantity) || quantity < 1 || unitPrice === null || serviceFee === null || shippingFee === null) {
+      return json(response, 422, { error: 'Completa el cliente, producto, cantidad y montos válidos.' });
+    }
+    if (!validSaleStatus(body.status)) return json(response, 422, { error: 'El estado de la venta no es válido.' });
+    const sale = await store.createSale({
+      customerId: body.customerId,
+      sellerId: seller.id,
+      productId: body.productId,
+      quantity,
+      unitPrice,
+      serviceFee,
+      shippingFee,
+      status: body.status,
+      notes: String(body.notes || '').trim().slice(0, 500)
+    });
+    if (!sale) return json(response, 422, { error: 'No fue posible registrar la venta con los datos seleccionados.' });
+    return json(response, 201, { sale });
+  }
+
   if (request.method === 'POST' && url.pathname === '/api/users') {
     if (!await requireRole(request, response, ['admin'])) return;
     const body = await readJson(request);
@@ -251,6 +327,30 @@ async function handleRequest(request, response) {
     return json(response, 201, { message: store.kind === 'sqlserver' ? 'Puja registrada.' : 'Puja registrada en modo demostración.', product });
   }
 
+  if (request.method === 'POST' && url.pathname === '/api/products') {
+    if (!await requireRole(request, response, ['admin', 'seller'])) return;
+    const body = await readJson(request);
+    const price = nonNegativeNumber(body.price);
+    const currentBid = nonNegativeNumber(body.currentBid ?? body.price);
+    const shipping = nonNegativeNumber(body.shipping ?? 0);
+    if (!String(body.title || '').trim() || !String(body.category || '').trim() || price === null || currentBid === null || shipping === null) {
+      return json(response, 422, { error: 'Completa el título, categoría y montos válidos del producto.' });
+    }
+    const product = await store.createProduct({
+      id: `product-${randomUUID()}`,
+      title: String(body.title).trim(),
+      category: String(body.category).trim(),
+      description: String(body.description || '').trim(),
+      image: String(body.image || '').trim() || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=900&q=80',
+      price,
+      currentBid,
+      bids: 0,
+      shipping,
+      badge: String(body.badge || 'Disponible').trim() || 'Disponible'
+    });
+    return json(response, 201, { product });
+  }
+
   if (request.method === 'PATCH' && url.pathname.startsWith('/api/products/')) {
     if (!await requireRole(request, response, ['admin', 'seller'])) return;
     const productId = decodeURIComponent(url.pathname.replace('/api/products/', ''));
@@ -263,6 +363,7 @@ async function handleRequest(request, response) {
         changes[field] = value;
       }
     }
+    if (body.image !== undefined) changes.image = String(body.image).trim();
     for (const field of ['price', 'currentBid', 'shipping']) {
       if (body[field] === undefined) continue;
       const value = Number(body[field]);
@@ -272,6 +373,15 @@ async function handleRequest(request, response) {
     const product = await store.updateProduct(productId, changes);
     if (!product) return json(response, 404, { error: 'Producto no encontrado.' });
     return json(response, 200, { product });
+  }
+
+
+  if (request.method === 'DELETE' && url.pathname.startsWith('/api/products/')) {
+    if (!await requireRole(request, response, ['admin', 'seller'])) return;
+    const productId = decodeURIComponent(url.pathname.replace('/api/products/', ''));
+    const removed = await store.deleteProduct(productId);
+    if (!removed) return json(response, 404, { error: 'Producto no encontrado.' });
+    return json(response, 200, { message: 'Producto eliminado del catálogo.' });
   }
 
   if (request.method !== 'GET') return json(response, 405, { error: 'Método no permitido' });
